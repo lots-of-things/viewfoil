@@ -1,0 +1,5 @@
+cron:
+- description: pull tweets
+  url: /
+  schedule: every 30 mins
+  timezone: America/Chicago
