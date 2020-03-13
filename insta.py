@@ -9,7 +9,9 @@ with open('last_insta', 'r') as f:
     last_insta = f.read()
 new_last = last_insta
 to_post = []
-webdriver = webdriver.Chrome(executable_path='/home/stedn/Downloads/chromedriver')
+options = webdriver.ChromeOptions();
+options.add_argument('headless');
+webdriver = webdriver.Chrome(options=options,executable_path='/home/stedn/Downloads/chromedriver')
 for i in range(1,2):
     webdriver.get('https://www.instagram.com/bonkerfield')
     sleep(randint(1,6))

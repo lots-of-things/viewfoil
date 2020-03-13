@@ -7,6 +7,7 @@ import sys
 from oauth2client import client
 from googleapiclient.discovery import build
 import google.oauth2.credentials
+from google.cloud import datastore                                 
 import google_auth_oauthlib.flow
 import tweepy
 import configparser
@@ -40,18 +41,22 @@ def get_all_tweets(screen_name, last_post):
 
 @app.route('/')
 def main():
+  datastore_client = datastore.Client.from_service_account_json('service_account.json') 
+  key = datastore_client.key('Task', 'sample_task')   
+  task = datastore_client.get(key)  
   # if credentials not initialized, run authorization
-  if 'credentials' not in flask.session:
+  if not task:
+    return flask.redirect('authorize')
+  try:
+    # reload credentials
+    credentials = google.oauth2.credentials.Credentials(**task)
+  except:
     return flask.redirect('authorize')
 
-  # reload credentials
-  credentials = google.oauth2.credentials.Credentials(
-      **flask.session['credentials'])
-  
   # Save credentials back to session in case access token was refreshed.
-  # ACTION ITEM: In a production app, you likely want to save these
-  #              credentials in a persistent database instead.
-  flask.session['credentials'] = credentials_to_dict(credentials)
+  task.update(credentials_to_dict(credentials))
+  datastore_client.put(task)
+
   service = build('blogger', 'v3', credentials=credentials)
   
   try:
@@ -142,40 +147,38 @@ def oauth2callback():
   flow.fetch_token(authorization_response=authorization_response)
 
   # Store credentials in the session.
-  # ACTION ITEM: In a production app, you likely want to save these
-  #              credentials in a persistent database instead.
   credentials = flow.credentials
-  flask.session['credentials'] = credentials_to_dict(credentials)
+  datastore_client = datastore.Client.from_service_account_json('service_account.json') 
+  key = datastore_client.key('Task', 'sample_task')   
+  task = datastore.Entity(key=key) 
+ 
+  task.update(credentials_to_dict(credentials))
+  datastore_client.put(task)
 
   return flask.redirect(flask.url_for('main'))
 
 
 @app.route('/revoke')
 def revoke():
-  if 'credentials' not in flask.session:
+  datastore_client = datastore.Client.from_service_account_json('service_account.json') 
+  key = datastore_client.key('Task', 'sample_task')   
+  task = datastore_client.get(key)  
+  try:
+    credentials = google.oauth2.credentials.Credentials(**task)
+  except:
     return ('You need to <a href="/authorize">authorize</a> before ' +
             'testing the code to revoke credentials.')
-
-  credentials = google.oauth2.credentials.Credentials(
-    **flask.session['credentials'])
+  key.delete()
 
   revoke = requests.post('https://oauth2.googleapis.com/revoke',
       params={'token': credentials.token},
       headers = {'content-type': 'application/x-www-form-urlencoded'})
-
+  
   status_code = getattr(revoke, 'status_code')
   if status_code == 200:
     return('Credentials successfully revoked.' + print_index_table())
   else:
     return('An error occurred.' + print_index_table())
-
-
-@app.route('/clear')
-def clear_credentials():
-  if 'credentials' in flask.session:
-    del flask.session['credentials']
-  return ('Credentials have been cleared.<br><br>' +
-          print_index_table())
 
 
 def credentials_to_dict(credentials):
