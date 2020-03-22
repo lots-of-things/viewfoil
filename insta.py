@@ -44,7 +44,8 @@ for dt, emb in to_post:
     body = {
     "title": '📷',
     "content": emb,
-    "published": dt
+    "published": dt,
+    "labels": ["instagram"]
     }
     posts.insert(blogId='1931799900575633473', body=body).execute()
     sleep(randint(1,2))

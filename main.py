@@ -16,7 +16,7 @@ import flask
 import pytz
 
 app = flask.Flask(__name__)
-app.secret_key = 'REPLACE ME - this value is here as a placeholder.'
+app.secret_key = 'tvqAS9c51oVyzHR9pKjL'
 
 
 def get_all_tweets(screen_name, last_post):
@@ -95,7 +95,8 @@ def main():
       body = {
         "title": '🐦',
         "content": emb['html'],
-        "published": f"{t.created_at.isoformat()}-00:00"
+        "published": f"{t.created_at.isoformat()}-00:00",
+        "labels": ["twitter"]
         }
       posts.insert(blogId='1931799900575633473', body=body).execute()
     return 'Success!'
