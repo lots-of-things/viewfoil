@@ -14,13 +14,40 @@ import configparser
 from datetime import datetime, timedelta
 import flask
 import pytz
+import json
+import praw
+import requests
+import xml.etree.ElementTree as ET
+from time import sleep
+
+
+import re
+
+def cleanhtml(raw_html):
+  cleanr = re.compile('<.*?>')
+  cleantext = re.sub(cleanr, '', raw_html)
+  return cleantext
+
 
 app = flask.Flask(__name__)
 app.secret_key = 'tvqAS9c51oVyzHR9pKjL'
 
+def get_last_post(posts, labels):
+  startDate = f'{(datetime.now() - timedelta(days=2)).isoformat()}-00:00'
+  request = posts.list(blogId='1931799900575633473',labels=labels,startDate=startDate)
+  last_post = pytz.utc.localize(datetime(2020, 1, 1, 1, 1, 1, 1)) 
+  while request != None:
+    posts_doc = request.execute()
+    if 'items' in posts_doc and posts_doc['items'] is not None:
+      for post in posts_doc['items']:
+        q_post = datetime.fromisoformat(post['published'])
+        if q_post>last_post:
+          last_post = q_post
+          
+    request = posts.list_next(request, posts_doc)
+  return last_post
 
 def get_all_tweets(screen_name, last_post):
-  
   # load config
   config = configparser.RawConfigParser()
   config.read('settings.cfg')
@@ -45,7 +72,7 @@ def main():
   key = datastore_client.key('Task', 'sample_task')   
   task = datastore_client.get(key)  
   # if credentials not initialized, run authorization
-  if not task:
+  if not task or not task['refresh_token']:
     return flask.redirect('authorize')
   try:
     # reload credentials
@@ -60,35 +87,18 @@ def main():
   service = build('blogger', 'v3', credentials=credentials)
   
   try:
-    users = service.users()
-
-    # Retrieve the user's profile information
-    thisuser = users.get(userId='self').execute()
-    print('This user\'s display name is: %s' % thisuser['displayName'])
-
-    # access the viewfoil blog
-    blogs = service.blogs()
-    viewfoil = blogs.get(blogId='1931799900575633473').execute()
-    
-    # getting the last post logged on viewfoil
+    # get posting service
     posts = service.posts()
-    request = posts.list(blogId='1931799900575633473')
-    last_post = pytz.utc.localize(datetime(1988, 1, 1, 1, 1, 1, 1)) 
-    while request != None:
-      posts_doc = request.execute()
-      if 'items' in posts_doc and posts_doc['items'] is not None:
-        for post in posts_doc['items']:
-          q_post = datetime.fromisoformat(post['published'])
-          if q_post>last_post:
-            last_post = q_post
-            
-      request = posts.list_next(request, posts_doc)
+    
+    #
+    # Twitter
+    #
 
-
-    print(last_post + timedelta(minutes=1))
+    # getting the last twitter post logged on viewfoil
+    last_t_post = get_last_post(posts, 'twitter')
     
     # get all tweets after last_post
-    tweets = get_all_tweets('bonkerfield', last_post + timedelta(minutes=1))
+    tweets = get_all_tweets('bonkerfield', last_t_post + timedelta(minutes=1))
     # transfer each tweet to viewfoil
     for t, emb in tweets:
       print(t.created_at.isoformat())
@@ -99,6 +109,120 @@ def main():
         "labels": ["twitter"]
         }
       posts.insert(blogId='1931799900575633473', body=body).execute()
+      sleep(1)
+
+
+    #
+    # Reddit
+    #
+    # getting the last reddit post logged on viewfoil
+    last_r_post = get_last_post(posts, 'reddit')
+    
+    # get all reddit posts
+    with open('reddit_secrets.json', 'r') as f:
+      reddit_secrets = json.load(f)
+    reddit = praw.Reddit(client_id=reddit_secrets['client_id'], 
+                     client_secret=reddit_secrets['client_secret'],
+                     user_agent=reddit_secrets['user_agent'])
+
+    for sub in reddit.redditor('bonkerfield').submissions.new(limit=100):
+      created_at = datetime.fromtimestamp(sub.created_utc)
+      if pytz.utc.localize(created_at) > last_r_post + timedelta(minutes=1):
+        cont = f'<blockquote class="reddit-card"><a href="https://www.reddit.com{sub.permalink}">{sub.title}</a> from <a href="http://www.reddit.com/{sub.subreddit_name_prefixed}">{sub.subreddit_name_prefixed}</a></blockquote>'
+        body = {
+          "title": '👽',
+          "content": cont,
+          "published": f"{created_at.isoformat()}-00:00",
+          "labels": ["reddit"]
+        }
+        posts.insert(blogId='1931799900575633473', body=body).execute()
+        sleep(1)
+
+    for com in reddit.redditor('bonkerfield').comments.new(limit=100):
+      created_at = datetime.fromtimestamp(com.created_utc)
+      if pytz.utc.localize(created_at) > last_r_post + timedelta(minutes=1):
+        cont = f'<a class="embedly-card" href="https://www.reddit.com{com.permalink}">{com.body}</a>'
+        body = {
+          "title": '👽',
+          "content": cont,
+          "published": f"{created_at.isoformat()}-00:00",
+          "labels": ["reddit"]
+        }
+        posts.insert(blogId='1931799900575633473', body=body).execute()
+        sleep(1)
+
+    #
+    # YouTube
+    #
+
+    last_y_post = get_last_post(posts, 'youtube')
+
+    with open('youtube.json', 'r') as f:
+      youtube_key = json.load(f)
+    youtube = build('youtube','v3',developerKey=youtube_key['api_key']) 
+
+    request = youtube.search().list( 
+       part="snippet",  
+       channelId="UCjfbKpAq127UVuFeaepkvWg", 
+       order="date", 
+       publishedAfter=(last_y_post+timedelta(minutes=30)).isoformat()
+    ) 
+    response = request.execute()
+
+    for item in response['items']:
+      if item['id']['kind']=='youtube#video':
+        publishedAt = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z','+00:00' ))
+        cont = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{item["id"]["videoId"]}" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'
+        body = {
+          "title": '📺',
+          "content": cont,
+          "published": f"{publishedAt.isoformat() }",
+          "labels": ["youtube"]
+        }
+        posts.insert(blogId='1931799900575633473', body=body).execute()
+        sleep(1)
+
+    #
+    # bonkerfield
+    #
+    
+    last_b_post = get_last_post(posts, 'bonkerfield')
+    
+    resp = requests.get('https://www.bonkerfield.org/feed.xml')
+    root = ET.ElementTree(ET.fromstring(resp.content)).getroot()                      
+
+    # walk through feed for new posts
+    for item in root.findall('./channel/item'):
+      data = {} 
+      for child in item: 
+        if child.tag == 'pubDate': 
+          pubdate = datetime.strptime(child.text[:-6], '%a, %d %b %Y %H:%M:%S')
+          if pytz.utc.localize(pubdate) < last_b_post + timedelta(minutes=1):
+            break
+          data['published'] = pubdate
+        else: 
+          data[child.tag] = child.text 
+      
+      if 'link' not in data or 'published' not in data:
+        continue
+      
+      txt = f"<p>{cleanhtml(data['description'].split('</p>')[0])}</p>"
+      
+      if 'image' in data:
+        im_bit = f'<img src="{data["image"]}"/>'
+      else:
+        im_bit = ''
+      cont = f'<a href="{data["link"]}">{im_bit} {txt} <p>... read more on bonkerfield.org</p></a>'
+      # append news dictionary to news items list 
+      body = {
+        "title": data['title'],
+        "content": cont,
+        "published": f"{data['published'].isoformat()}-00:00",
+        "labels": ["bonkerfield"]
+      }
+      posts.insert(blogId='1931799900575633473', body=body).execute()
+      sleep(1)
+
     return 'Success!'
   
   except client.AccessTokenRefreshError:
@@ -125,7 +249,8 @@ def authorize():
       # re-prompting the user for permission. Recommended for web server apps.
       access_type='offline',
       # Enable incremental authorization. Recommended as a best practice.
-      include_granted_scopes='true')
+      include_granted_scopes='true',
+      prompt='consent')
 
   # Store the state so the callback can verify the auth server response.
   flask.session['state'] = state
@@ -169,7 +294,7 @@ def revoke():
   except:
     return ('You need to <a href="/authorize">authorize</a> before ' +
             'testing the code to revoke credentials.')
-  key.delete()
+  datastore_client.delete(key)
 
   revoke = requests.post('https://oauth2.googleapis.com/revoke',
       params={'token': credentials.token},

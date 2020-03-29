@@ -1,0 +1,5 @@
+.gcloudignore
+*.dat
+*.json
+last_insta
+*.cfg
