@@ -33,9 +33,9 @@ app = flask.Flask(__name__)
 app.secret_key = 'tvqAS9c51oVyzHR9pKjL'
 
 def get_last_post(posts, labels):
-  startDate = f'{(datetime.now() - timedelta(days=2)).isoformat()}-00:00'
+  startDate = f'{(datetime.now() - timedelta(days=30)).isoformat()}-00:00'
   request = posts.list(blogId='1931799900575633473',labels=labels,startDate=startDate)
-  last_post = pytz.utc.localize(datetime(2020, 1, 1, 1, 1, 1, 1)) 
+  last_post = pytz.utc.localize(datetime.now() - timedelta(days=30)))
   while request != None:
     posts_doc = request.execute()
     if 'items' in posts_doc and posts_doc['items'] is not None:
