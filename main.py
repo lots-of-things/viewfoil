@@ -111,7 +111,38 @@ def main():
       posts.insert(blogId='1931799900575633473', body=body).execute()
       sleep(1)
 
+    #
+    # Mastodon
+    #
 
+    last_m_post = get_last_post(posts, 'mastodon')
+    
+    resp = requests.get('https://fosstodon.org/users/bonkerfield.rss')
+    root = ET.ElementTree(ET.fromstring(resp.content)).getroot()                      
+
+    # walk through feed for new posts
+    for item in root.findall('./channel/item'):
+      data = {} 
+      for child in item: 
+        if child.tag == 'pubDate': 
+          pubdate = datetime.strptime(child.text[:-6], '%a, %d %b %Y %H:%M:%S')
+          if pytz.utc.localize(pubdate) < last_m_post + timedelta(minutes=1):
+            break
+          data['published'] = pubdate
+        else: 
+          data[child.tag] = child.text 
+      
+      cont = f'<iframe src="{data["guid"]}/embed" class="mastodon-embed" style="max-width: 100%; border: 0" width="400" allowfullscreen="allowfullscreen"></iframe>'
+
+      body = {
+        "title": "🐘",
+        "content": cont,
+        "published": f"{data['published'].isoformat()}-00:00",
+        "labels": ["mastodon"]
+      }
+      posts.insert(blogId='1931799900575633473', body=body).execute()
+      sleep(1)
+    
     #
     # Reddit
     #
