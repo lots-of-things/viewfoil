@@ -132,6 +132,9 @@ def main():
         else: 
           data[child.tag] = child.text 
       
+      if 'published' not in data:
+        continue
+
       cont = f'<iframe src="{data["guid"]}/embed" class="mastodon-embed" style="max-width: 100%; border: 0" width="400" allowfullscreen="allowfullscreen"></iframe>'
 
       body = {
