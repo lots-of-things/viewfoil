@@ -20,6 +20,7 @@ import requests
 import xml.etree.ElementTree as ET
 from time import sleep
 
+import ronkyuu
 
 import re
 
@@ -27,6 +28,16 @@ def cleanhtml(raw_html):
   cleanr = re.compile('<.*?>')
   cleantext = re.sub(cleanr, '', raw_html)
   return cleantext
+
+
+def send_webmentions_for_bonkerfield(sourceURL):
+  mentions = ronkyuu.findMentions(sourceURL)
+
+  for href in mentions['refs']:
+    if sourceURL != href:
+      wmStatus, wmUrl = ronkyuu.discoverEndpoint(href, test_urls=False)
+      if wmUrl is not None and wmStatus == 200:
+        status_code = ronkyuu.sendWebmention(sourceURL, href, wmUrl)
 
 
 app = flask.Flask(__name__)
@@ -255,7 +266,9 @@ def main():
         "labels": ["bonkerfield"]
       }
       posts.insert(blogId='1931799900575633473', body=body).execute()
+      send_webmentions_for_bonkerfield(data["link"])
       sleep(1)
+
 
     return 'Success!'
   
