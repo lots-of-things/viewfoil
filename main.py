@@ -7,7 +7,7 @@ import sys
 from oauth2client import client
 from googleapiclient.discovery import build
 import google.oauth2.credentials
-from google.cloud import datastore                                 
+from google.cloud import datastore
 import google_auth_oauthlib.flow
 import tweepy
 import configparser
@@ -24,11 +24,17 @@ import ronkyuu
 
 import re
 
+import random
+import string
+
+def randomString(stringLength=8):
+    letters = string.ascii_lowercase
+    return ''.join(random.choice(letters) for i in range(stringLength))
+
 def cleanhtml(raw_html):
   cleanr = re.compile('<.*?>')
   cleantext = re.sub(cleanr, '', raw_html)
   return cleantext
-
 
 def send_webmentions_for_bonkerfield(sourceURL):
   mentions = ronkyuu.findMentions(sourceURL)
@@ -54,7 +60,7 @@ def get_last_post(posts, labels):
         q_post = datetime.fromisoformat(post['published'])
         if q_post>last_post:
           last_post = q_post
-          
+
     request = posts.list_next(request, posts_doc)
   return last_post
 
@@ -66,7 +72,7 @@ def get_all_tweets(screen_name, last_post):
   consumer_secret = config.get('Twitter OAuth', 'CONSUMER_SECRET')
   access_key = config.get('Twitter OAuth', 'ACCESS_TOKEN_KEY')
   access_secret = config.get('Twitter OAuth', 'ACCESS_TOKEN_SECRET')
-  
+
   # auth tweepy
   auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
   auth.set_access_token(access_key, access_secret)
@@ -77,11 +83,11 @@ def get_all_tweets(screen_name, last_post):
   return [(tweet, api.get_oembed(id=tweet.id)) for tweet in alltweets if pytz.utc.localize(tweet.created_at) > last_post]
 
 
-@app.route('/')
-def main():
-  datastore_client = datastore.Client.from_service_account_json('service_account.json') 
-  key = datastore_client.key('Task', 'sample_task')   
-  task = datastore_client.get(key)  
+@app.route('/message', methods=['GET', 'POST'])
+def message():
+  datastore_client = datastore.Client.from_service_account_json('service_account.json')
+  key = datastore_client.key('Task', 'sample_task')
+  task = datastore_client.get(key)
   # if credentials not initialized, run authorization
   if not task or not task['refresh_token']:
     return flask.redirect('authorize')
@@ -96,18 +102,72 @@ def main():
   datastore_client.put(task)
 
   service = build('blogger', 'v3', credentials=credentials)
-  
+  posts = service.posts()
+
+  human = flask.request.form.get('human')
+  if not human:
+    return flask.redirect("http://viewfoil.bonkerfield.org", code=302)
+
+  name = flask.request.form.get('fname')
+  content = flask.request.form.get('lname')
+  sent_time = datetime.utcnow().isoformat()
+  email = flask.request.form.get('email')
+  public_body = {
+    "title": f"message from: {name}",
+    "content": content,
+    "published": f"{sent_time}-00:00",
+    "labels": ["message"]
+  }
+  private_body = {
+    "title": name,
+    "content": content,
+    "published": sent_time,
+    "email": email
+  }
+
+  private = flask.request.form.get('private')
+  if not private:
+    posts.insert(blogId='1931799900575633473', body=public_body).execute()
+
+  msg_key = datastore_client.key('Message', randomString())
+  msg_task = datastore.Entity(key=msg_key)
+  msg_task.update(private_body)
+  datastore_client.put(msg_task)
+
+  return flask.redirect("http://viewfoil.bonkerfield.org", code=302)
+
+
+@app.route('/')
+def main():
+  datastore_client = datastore.Client.from_service_account_json('service_account.json')
+  key = datastore_client.key('Task', 'sample_task')
+  task = datastore_client.get(key)
+  # if credentials not initialized, run authorization
+  if not task or not task['refresh_token']:
+    return flask.redirect('authorize')
+  try:
+    # reload credentials
+    credentials = google.oauth2.credentials.Credentials(**task)
+  except:
+    return flask.redirect('authorize')
+
+  # Save credentials back to session in case access token was refreshed.
+  task.update(credentials_to_dict(credentials))
+  datastore_client.put(task)
+
+  service = build('blogger', 'v3', credentials=credentials)
+
   try:
     # get posting service
     posts = service.posts()
-    
+
     #
     # Twitter
     #
 
     # getting the last twitter post logged on viewfoil
     last_t_post = get_last_post(posts, 'twitter')
-    
+
     # get all tweets after last_post
     tweets = get_all_tweets('bonkerfield', last_t_post + timedelta(minutes=1))
     # transfer each tweet to viewfoil
@@ -127,22 +187,22 @@ def main():
     #
 
     last_m_post = get_last_post(posts, 'mastodon')
-    
+
     resp = requests.get('https://fosstodon.org/users/bonkerfield.rss')
-    root = ET.ElementTree(ET.fromstring(resp.content)).getroot()                      
+    root = ET.ElementTree(ET.fromstring(resp.content)).getroot()
 
     # walk through feed for new posts
     for item in root.findall('./channel/item'):
-      data = {} 
-      for child in item: 
-        if child.tag == 'pubDate': 
+      data = {}
+      for child in item:
+        if child.tag == 'pubDate':
           pubdate = datetime.strptime(child.text[:-6], '%a, %d %b %Y %H:%M:%S')
           if pytz.utc.localize(pubdate) < last_m_post + timedelta(minutes=1):
             break
           data['published'] = pubdate
-        else: 
-          data[child.tag] = child.text 
-      
+        else:
+          data[child.tag] = child.text
+
       if 'published' not in data:
         continue
 
@@ -156,17 +216,17 @@ def main():
       }
       posts.insert(blogId='1931799900575633473', body=body).execute()
       sleep(1)
-    
+
     #
     # Reddit
     #
     # getting the last reddit post logged on viewfoil
     last_r_post = get_last_post(posts, 'reddit')
-    
+
     # get all reddit posts
     with open('reddit_secrets.json', 'r') as f:
       reddit_secrets = json.load(f)
-    reddit = praw.Reddit(client_id=reddit_secrets['client_id'], 
+    reddit = praw.Reddit(client_id=reddit_secrets['client_id'],
                      client_secret=reddit_secrets['client_secret'],
                      user_agent=reddit_secrets['user_agent'])
 
@@ -204,14 +264,14 @@ def main():
 
     with open('youtube.json', 'r') as f:
       youtube_key = json.load(f)
-    youtube = build('youtube','v3',developerKey=youtube_key['api_key']) 
+    youtube = build('youtube','v3',developerKey=youtube_key['api_key'])
 
-    request = youtube.search().list( 
-       part="snippet",  
-       channelId="UCjfbKpAq127UVuFeaepkvWg", 
-       order="date", 
+    request = youtube.search().list(
+       part="snippet",
+       channelId="UCjfbKpAq127UVuFeaepkvWg",
+       order="date",
        publishedAfter=(last_y_post+timedelta(minutes=30)).isoformat()
-    ) 
+    )
     response = request.execute()
 
     for item in response['items']:
@@ -230,35 +290,35 @@ def main():
     #
     # bonkerfield
     #
-    
+
     last_b_post = get_last_post(posts, 'bonkerfield')
-    
+
     resp = requests.get('https://www.bonkerfield.org/feed.xml')
-    root = ET.ElementTree(ET.fromstring(resp.content)).getroot()                      
+    root = ET.ElementTree(ET.fromstring(resp.content)).getroot()
 
     # walk through feed for new posts
     for item in root.findall('./channel/item'):
-      data = {} 
-      for child in item: 
-        if child.tag == 'pubDate': 
+      data = {}
+      for child in item:
+        if child.tag == 'pubDate':
           pubdate = datetime.strptime(child.text[:-6], '%a, %d %b %Y %H:%M:%S')
           if pytz.utc.localize(pubdate) < last_b_post + timedelta(minutes=1):
             break
           data['published'] = pubdate
-        else: 
-          data[child.tag] = child.text 
-      
+        else:
+          data[child.tag] = child.text
+
       if 'link' not in data or 'published' not in data:
         continue
-      
+
       txt = f"<p>{cleanhtml(data['description'].split('</p>')[0])}</p>"
-      
+
       if 'image' in data:
         im_bit = f'<img src="{data["image"]}"/>'
       else:
         im_bit = ''
       cont = f'<a href="{data["link"]}">{im_bit} {txt} <p>... read more on bonkerfield.org</p></a>'
-      # append news dictionary to news items list 
+      # append news dictionary to news items list
       body = {
         "title": data['title'],
         "content": cont,
@@ -271,11 +331,11 @@ def main():
 
 
     return 'Success!'
-  
+
   except client.AccessTokenRefreshError:
     return ('The credentials have been revoked or expired, please re-run'
       'the application to re-authorize')
-  
+
   return 'something went wrong'
 
 
@@ -321,10 +381,10 @@ def oauth2callback():
 
   # Store credentials in the session.
   credentials = flow.credentials
-  datastore_client = datastore.Client.from_service_account_json('service_account.json') 
-  key = datastore_client.key('Task', 'sample_task')   
-  task = datastore.Entity(key=key) 
- 
+  datastore_client = datastore.Client.from_service_account_json('service_account.json')
+  key = datastore_client.key('Task', 'sample_task')
+  task = datastore.Entity(key=key)
+
   task.update(credentials_to_dict(credentials))
   datastore_client.put(task)
 
@@ -333,9 +393,9 @@ def oauth2callback():
 
 @app.route('/revoke')
 def revoke():
-  datastore_client = datastore.Client.from_service_account_json('service_account.json') 
-  key = datastore_client.key('Task', 'sample_task')   
-  task = datastore_client.get(key)  
+  datastore_client = datastore.Client.from_service_account_json('service_account.json')
+  key = datastore_client.key('Task', 'sample_task')
+  task = datastore_client.get(key)
   try:
     credentials = google.oauth2.credentials.Credentials(**task)
   except:
@@ -346,7 +406,7 @@ def revoke():
   revoke = requests.post('https://oauth2.googleapis.com/revoke',
       params={'token': credentials.token},
       headers = {'content-type': 'application/x-www-form-urlencoded'})
-  
+
   status_code = getattr(revoke, 'status_code')
   if status_code == 200:
     return('Credentials successfully revoked.' + print_index_table())
