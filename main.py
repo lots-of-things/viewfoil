@@ -27,6 +27,8 @@ import re
 import random
 import string
 
+from arena import Arena
+
 def randomString(stringLength=8):
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for i in range(stringLength))
@@ -260,32 +262,32 @@ def main():
     # YouTube
     #
 
-    last_y_post = get_last_post(posts, 'youtube')
+    # last_y_post = get_last_post(posts, 'youtube')
 
-    with open('youtube.json', 'r') as f:
-      youtube_key = json.load(f)
-    youtube = build('youtube','v3',developerKey=youtube_key['api_key'])
+    # with open('youtube.json', 'r') as f:
+    #   youtube_key = json.load(f)
+    # youtube = build('youtube','v3',developerKey=youtube_key['api_key'])
 
-    request = youtube.search().list(
-       part="snippet",
-       channelId="UCjfbKpAq127UVuFeaepkvWg",
-       order="date",
-       publishedAfter=(last_y_post+timedelta(minutes=30)).isoformat()
-    )
-    response = request.execute()
+    # request = youtube.search().list(
+    #    part="snippet",
+    #    channelId="UCjfbKpAq127UVuFeaepkvWg",
+    #    order="date",
+    #    publishedAfter=(last_y_post+timedelta(minutes=30)).isoformat()
+    # )
+    # response = request.execute()
 
-    for item in response['items']:
-      if item['id']['kind']=='youtube#video':
-        publishedAt = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z','+00:00' ))
-        cont = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{item["id"]["videoId"]}" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'
-        body = {
-          "title": '📺',
-          "content": cont,
-          "published": f"{publishedAt.isoformat() }",
-          "labels": ["youtube"]
-        }
-        posts.insert(blogId='1931799900575633473', body=body).execute()
-        sleep(1)
+    # for item in response['items']:
+    #   if item['id']['kind']=='youtube#video':
+    #     publishedAt = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z','+00:00' ))
+    #     cont = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{item["id"]["videoId"]}" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'
+    #     body = {
+    #       "title": '📺',
+    #       "content": cont,
+    #       "published": f"{publishedAt.isoformat() }",
+    #       "labels": ["youtube"]
+    #     }
+    #     posts.insert(blogId='1931799900575633473', body=body).execute()
+    #     sleep(1)
 
     #
     # bonkerfield
@@ -329,6 +331,51 @@ def main():
       send_webmentions_for_bonkerfield(data["link"])
       sleep(1)
 
+    #
+    # are.na
+    #
+
+    last_a_post = get_last_post(posts, 'are.na')
+
+    with open('arena.json', 'r') as f:
+      arena_secret = json.load(f)
+
+    arena = Arena(arena_secret['secret'])
+    for channel in arena.users.user('will-stedden').channels()[0]:
+      for block in channel.contents()[0]:
+        if block.connected_by_user_slug=='will-stedden':
+          data = {}
+          pubdate = datetime.strptime(block.connected_at[:-1], '%Y-%m-%dT%H:%M:%S.%f')
+          # pubdate = datetime.fromtimestamp(block.connected_at)
+          if pytz.utc.localize(pubdate) < last_a_post + timedelta(minutes=1):
+            break
+
+          im_bit = ''
+          cont_bit = ''
+          desc_bit = ''
+          if block.image:
+            im_bit = f'<img src="{block.image["thumb"]["url"] }"/>'
+          if block.content!='':
+            cont_bit = f'<p>{block.content}</p>'
+          if block.description!='' and block.description!=block.content:
+            desc_bit = f'<p>{block.description}</p>'
+
+          cont = f'<a href="https://www.are.na/block/{block.id}">{im_bit} <h4>{block.title}</h4> {cont_bit} {desc_bit}</a>'
+          # append news dictionary to news items list
+          body = {
+            "title": '🏟️',
+            "content": cont,
+            "published": f"{pubdate.isoformat()}-00:00",
+            "labels": ["are.na"]
+          }
+          posts.insert(blogId='1931799900575633473', body=body).execute()
+
+    for subreddit in ['science','news','politics']:
+      for submission in reddit.subreddit(subreddit).top(time_filter='day',limit=5):
+        if not submission.is_self:
+          myobj = {'article-title': submission.title, 'article-url': submission.url, 'article-why': 'top link on r/'+subreddit}
+          requests.post('http://oneth.bonkerfield.org/submit', data = myobj)
+          break
 
     return 'Success!'
 
