@@ -159,30 +159,30 @@ def main():
 
   service = build('blogger', 'v3', credentials=credentials)
 
-  try:
-    # get posting service
-    posts = service.posts()
+  # try:
+  #   # get posting service
+  #   posts = service.posts()
 
-    #
-    # Twitter
-    #
+  #   #
+  #   # Twitter
+  #   #
 
-    # getting the last twitter post logged on viewfoil
-    last_t_post = get_last_post(posts, 'twitter')
+  #   # getting the last twitter post logged on viewfoil
+  #   last_t_post = get_last_post(posts, 'twitter')
 
-    # get all tweets after last_post
-    tweets = get_all_tweets('bonkerfield', last_t_post + timedelta(minutes=1))
-    # transfer each tweet to viewfoil
-    for t, emb in tweets:
-      print(t.created_at.isoformat())
-      body = {
-        "title": '🐦',
-        "content": emb['html'],
-        "published": f"{t.created_at.isoformat()}-00:00",
-        "labels": ["twitter"]
-        }
-      posts.insert(blogId='1931799900575633473', body=body).execute()
-      sleep(1)
+  #   # get all tweets after last_post
+  #   tweets = get_all_tweets('bonkerfield', last_t_post + timedelta(minutes=1))
+  #   # transfer each tweet to viewfoil
+  #   for t, emb in tweets:
+  #     print(t.created_at.isoformat())
+  #     body = {
+  #       "title": '🐦',
+  #       "content": emb['html'],
+  #       "published": f"{t.created_at.isoformat()}-00:00",
+  #       "labels": ["twitter"]
+  #       }
+  #     posts.insert(blogId='1931799900575633473', body=body).execute()
+  #     sleep(1)
 
     #
     # Mastodon
