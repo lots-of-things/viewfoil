@@ -190,7 +190,7 @@ def main():
 
     last_m_post = get_last_post(posts, 'mastodon')
 
-    resp = requests.get('https://fosstodon.org/users/bonkerfield.rss')
+    resp = requests.get('https://sigmoid.social/users/bonkerfield.rss')
     root = ET.ElementTree(ET.fromstring(resp.content)).getroot()
 
     # walk through feed for new posts
